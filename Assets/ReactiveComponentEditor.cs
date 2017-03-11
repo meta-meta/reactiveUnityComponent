@@ -11,6 +11,19 @@ public class ReactiveComponentEditor : Editor
     private string gameObjectName = "";
     private GameObject gameObject;
 
+    private Dictionary<Type, Func<object, object>> Controls = new Dictionary<Type, Func<object, object>>
+    {
+        {
+            typeof (float), (val) =>
+            {
+                var text = GUILayout.TextField(val.ToString()); // TODO: OR dig through other GameObjects/components
+                GUILayout.Label("---- " + val);
+                return float.Parse(text); // TODO: tryparse
+            }
+        }
+
+    };
+
     public override void OnInspectorGUI()
     {
         var component = target as ReactiveComponent;
@@ -60,34 +73,39 @@ public class ReactiveComponentEditor : Editor
                 {
                     GUILayout.Label("fn: " + p.Key);
                     var allArgs = p.Value.GetType().GetGenericArguments();
-                    allArgs.Take(allArgs.Length - 1).ToList().ForEach(arg =>
+                    allArgs.Take(allArgs.Length - 1).ToList().ForEachWithIndex((arg, i) =>
                     {
                         GUILayout.Label("--" + arg.FullName);
                         // TODO: this is where you dig through other GameObjects' properties for things that match this param's datatype
 
-                        switch (arg.FullName)
+                        if (Controls.ContainsKey(arg))
                         {
-                            case "System.Single":
-                                var currProp = component.State.ContainsKey(prop) ? component.State[prop] as Dictionary<string, object> : new Dictionary<string, object>();
-                                var param = p.Key;
-                                var val = currProp.ContainsKey(param) ? currProp[param] : ""; // TODO: float
-                                var nextVal = GUILayout.TextField((string)val); // TODO: OR dig through other GameObjects/components
-                                GUILayout.Label("----" + val);
-                                currProp[param] = nextVal;
-                                component.State[prop] = currProp;
-                                // TODO: convert to float
-                                break;
-
-                            case "UnityEngine.Vector3":
-                                break;
-
-
-                                // TODO: apply function to anything as adapter. construct chains of relationships node 
-                                // [GameObject Component Param]--[fn]--[fn]--<list fns with matching types>--[ReactiveComponent prop]
+                            var currParams = component.GetParams(prop);
+                            var param = p.Key;
+                            var val = currParams.ContainsKey(param) ? (float)currParams[param] : new float(); // TODO: float
+                            var nextVal = Controls[arg].Invoke(val);
+                            component.SetParam(prop, param, nextVal);
                         }
+                        else
+                        {
+//                            Debug.Log("Control not found for arg of type " + arg.FullName + " at position: " + i);
+                        }
+
+                        // TODO: apply function to anything as adapter. construct chains of relationships node 
+                        // [GameObject Component Param]--[fn]--[fn]--<list fns with matching types>--[ReactiveComponent prop]
                     });
                 });
         });
 
+    }
+}
+
+public static class ForEachExtensions
+{
+    public static void ForEachWithIndex<T>(this IEnumerable<T> enumerable, Action<T, int> handler)
+    {
+        int idx = 0;
+        foreach (T item in enumerable)
+            handler(item, idx++);
     }
 }

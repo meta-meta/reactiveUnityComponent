@@ -18,6 +18,19 @@ public class ReactiveComponent : MonoBehaviour {
         this.State[prop] = nextProp;
     }
 
+    public Dictionary<string, object> GetParams(string prop)
+    {
+        var currParams = State.ContainsKey(prop) ? State[prop] as Dictionary<string, object> : new Dictionary<string, object>();
+        State[prop] = currParams;
+        return currParams;
+    }
+
+    public void SetParam(string prop, string param, object val)
+    {
+        var currParams = GetParams(prop);
+        currParams[param] = val;
+    }
+
     private static Func<Vector3, float, Func<Vector3>> multiplyVectorScalar = (Vector3 v, float f) => () => v*f;
     private static Func<Vector3, Vector3, Func<Vector3>> addVectors = (Vector3 v1, Vector3 v2) => () => v1 + v2;
     private static Func<Quaternion, float, Func<Quaternion>> multiplyRotation = (Quaternion q, float f) => () => Quaternion.Euler(q.eulerAngles * f);
