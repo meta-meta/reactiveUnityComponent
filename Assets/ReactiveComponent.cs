@@ -8,6 +8,16 @@ public class ReactiveComponent : MonoBehaviour {
         {"", 1}
     };
 
+    public void SetState(string prop, string param, object val)
+    {
+        var exists = this.State.ContainsKey(prop);
+        var nextProp = exists
+            ? (Dictionary<string, object>) this.State.Get<Dictionary<string, object>>(prop)
+            : new Dictionary<string, object>();
+        nextProp[param] = val;
+        this.State[prop] = nextProp;
+    }
+
     private static Func<Vector3, float, Func<Vector3>> multiplyVectorScalar = (Vector3 v, float f) => () => v*f;
     private static Func<Vector3, Vector3, Func<Vector3>> addVectors = (Vector3 v1, Vector3 v2) => () => v1 + v2;
     private static Func<Quaternion, float, Func<Quaternion>> multiplyRotation = (Quaternion q, float f) => () => Quaternion.Euler(q.eulerAngles * f);
