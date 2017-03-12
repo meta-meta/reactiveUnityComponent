@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
+using Object = System.Object;
 
 [CustomEditor(typeof(ReactiveComponent))]
 public class ReactiveComponentEditor : Editor
@@ -11,13 +12,60 @@ public class ReactiveComponentEditor : Editor
     private string gameObjectName = "";
     private GameObject gameObject;
 
-    private Dictionary<Type, Func<object, object>> TypesToControls = new Dictionary<Type, Func<object, object>>
+    private Dictionary<Type, Func<Ref, Ref>> TypesToControls;
+
+    public ReactiveComponentEditor()
     {
+        TypesToControls = new Dictionary<Type, Func<Ref, Ref>>
         {
-            typeof (float), (val) => EditorGUILayout.FloatField(null == val ? new float() : (float)val) // TODO: OR dig through other GameObjects/components
+            {
+                typeof (float), (val) =>
+                {
+                    var nextVal = EditorGUILayout.FloatField(null == val ? new float() : (float) val.Get());
+                    return new Ref(() => nextVal);
+                }
+                // TODO: OR dig through other GameObjects/components
+            }
+        };
+
+        TypesToControls.Add(typeof (Vector3), Vector3Control);
+    }
+
+    private Ref Vector3Control(Ref val)
+    {
+        var go = EditorGUILayout.ObjectField(
+            selectedGameObject ?? new UnityEngine.Object(),
+            typeof (GameObject),
+            true);
+
+        if (go.GetType() == typeof (GameObject))
+        {
+            selectedGameObject = (GameObject) go;
         }
 
-    };
+        if (null != selectedGameObject)
+        {
+            var t = selectedGameObject.transform;
+
+            var options = new Dictionary<string, Ref>
+            {
+                {"position", new Ref(() => t.position)},
+                {"localPosition", new Ref(() => t.localPosition)},
+                {"rotation.eulerAngles", new Ref(() => t.rotation.eulerAngles)},
+                {"localEulerAngles", new Ref(() => t.localEulerAngles)},
+                {"localScale", new Ref(() => t.localScale)},
+                {"lossyScale", new Ref(() => t.lossyScale)},
+            }.ToList();
+
+            var selectedIndex = DropDown("--Select-Field--", options.Select(pair => pair.Key));
+            if (selectedIndex < options.Count)
+            {
+                return options.ElementAt(selectedIndex).Value; // TODO: might need to be a fn to get current value
+            }
+        }
+
+        return val;
+    }
 
 
 
@@ -70,17 +118,18 @@ public class ReactiveComponentEditor : Editor
                 var fn = component.Functions[assignedFn];
                 GUILayout.Label("fn: " + assignedFn);
                 var genericArgs = fn.GetType().GetGenericArguments();
-                var fnParams = genericArgs.Take(genericArgs.Length - 1); // the last arg is the delegate's return value
+                var fnParamTypes = genericArgs.Take(genericArgs.Length - 1); // the last arg is the delegate's return value
 
-                fnParams.ToList().ForEachWithIndex((param, i) =>
+                fnParamTypes.ToList().ForEachWithIndex((paramType, i) =>
                 {
-                    GUILayout.Label("--" + param.FullName);
+                    GUILayout.Label("param: " + paramType.FullName);
+                    GUILayout.Label("arg: " + component.GetArgs(prop)[i]);
                     // TODO: this is where you dig through other GameObjects' properties for things that match this param's datatype
 
-                    if (TypesToControls.ContainsKey(param))
+                    if (TypesToControls.ContainsKey(paramType))
                     {
                         var args = component.GetArgs(prop);
-                        var nextVal = TypesToControls[param].Invoke(args[i]);
+                        var nextVal = TypesToControls[paramType].Invoke(args[i]);
                         component.SetArg(prop, i, nextVal);
                     }
                     else
@@ -109,6 +158,12 @@ public class ReactiveComponentEditor : Editor
         });
     }
 
+    private int DropDown(string title, IEnumerable<string> options)
+    {
+        var allOptions = options.Concat(new[] { title }).ToArray();
+        return EditorGUILayout.Popup(allOptions.Length - 1, allOptions);
+    }
+
     private void DropDown(string title, IEnumerable<string> options, Action<int> onSelect)
     {
         var allOptions = options.Concat(new[] { title }).ToArray();
@@ -127,5 +182,20 @@ public static class ForEachExtensions
         int idx = 0;
         foreach (T item in enumerable)
             handler(item, idx++);
+    }
+}
+
+// http://stackoverflow.com/questions/24329012/store-reference-to-an-object-in-dictionary
+public sealed class Ref
+{
+    public Func<object> Get { get; private set; }
+    public Ref(Func<object> getter)
+    {
+        Get = getter;
+    }
+
+    public override string ToString()
+    {
+        return Get().ToString();
     }
 }

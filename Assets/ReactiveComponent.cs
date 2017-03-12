@@ -1,13 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityScript.Lang;
 
 public class ReactiveComponent : MonoBehaviour
 {
-    private static Func<Vector3, float, Func<Vector3>> multiplyVectorScalar = (Vector3 v, float f) => () => v * f;
-    private static Func<Vector3, Vector3, Func<Vector3>> addVectors = (Vector3 v1, Vector3 v2) => () => v1 + v2;
-    private static Func<Quaternion, float, Func<Quaternion>> multiplyRotation = (Quaternion q, float f) => () => Quaternion.Euler(q.eulerAngles * f);
+    private static Func<Vector3, float, Vector3> multiplyVectorScalar = (Vector3 v, float f) => v * f;
+    private static Func<Vector3, Vector3, Vector3> addVectors = (Vector3 v1, Vector3 v2) => v1 + v2;
+    private static Func<Quaternion, float, Quaternion> multiplyRotation = (Quaternion q, float f) => Quaternion.Euler(q.eulerAngles * f);
 
     public Dictionary<string, Delegate> Functions = new Dictionary<string, Delegate>
     {
@@ -18,8 +19,8 @@ public class ReactiveComponent : MonoBehaviour
 
     public Dictionary<string, Type> PropsToFunctionTypes = new Dictionary<string, Type>
     {
-        {"localPosition", typeof(Func<Vector3>)},
-        {"localRotation", typeof(Func<Quaternion>)}
+        {"localPosition", typeof(Vector3)},
+        {"localRotation", typeof(Quaternion)}
     };
 
 /* Property Names => Functions/Params
@@ -37,10 +38,10 @@ public class ReactiveComponent : MonoBehaviour
 
         if (!nextProp.ContainsKey("fn") || !fn.Equals(nextProp["fn"]))
         {
-            var numArgs = Functions[fn].GetType().GetGenericArguments().Length;
+            var numArgs = Functions[fn].GetType().GetGenericArguments().Length - 1; // last arg is return val
             Debug.Log("assigning " + fn + "(<" + numArgs + ">) to " + prop);
             nextProp["fn"] = fn;
-            nextProp["args"] = new object[numArgs];
+            nextProp["args"] = new Ref[numArgs];
         }
     }
 
@@ -54,12 +55,12 @@ public class ReactiveComponent : MonoBehaviour
         return GetFnAssignment(prop).Get<string>("fn");
     }
 
-    public object[] GetArgs(string prop)
+    public Ref[] GetArgs(string prop)
     {
-        return GetFnAssignment(prop).Get<object[]>("args");
+        return GetFnAssignment(prop).Get<Ref[]>("args");
     }
 
-    public void SetArg(string prop, int paramIndex, object val)
+    public void SetArg(string prop, int paramIndex, Ref val)
     {
         GetArgs(prop)[paramIndex] = val;
     }
@@ -81,7 +82,21 @@ public class ReactiveComponent : MonoBehaviour
     }
 	
 	// Update is called once per frame
-	void Update () {
+	void Update ()
+	{
+	    if (PropsToFunctions.ContainsKey("localPosition"))
+	    {
+	        var p = GetFnAssignment("localPosition");
+	        var args = GetArgs("localPosition");
+	        if (args.All(a => null != a))
+	        {
+	            var fn = p.Get<string>("fn");
+	            var derefedArgs = args.Select(a => a.Get()).ToArray();
+	            var val = Functions[fn].DynamicInvoke(derefedArgs);
+                transform.localPosition = (Vector3)val;
+            }
+        }
+
         if (null != position)
         {
             transform.localPosition = position.Invoke();
