@@ -11,92 +11,112 @@ public class ReactiveComponentEditor : Editor
     private string gameObjectName = "";
     private GameObject gameObject;
 
-    private Dictionary<Type, Func<object, object>> Controls = new Dictionary<Type, Func<object, object>>
+    private Dictionary<Type, Func<object, object>> TypesToControls = new Dictionary<Type, Func<object, object>>
     {
         {
-            typeof (float), (val) =>
-            {
-                var text = GUILayout.TextField(val.ToString()); // TODO: OR dig through other GameObjects/components
-                GUILayout.Label("---- " + val);
-                return float.Parse(text); // TODO: tryparse
-            }
+            typeof (float), (val) => EditorGUILayout.FloatField(null == val ? new float() : (float)val) // TODO: OR dig through other GameObjects/components
         }
 
     };
+
+
 
     public override void OnInspectorGUI()
     {
         var component = target as ReactiveComponent;
 
-        var gameObjStyle = new GUIStyle(GUI.skin.textField);
-        gameObjStyle.fontStyle = gameObject == null ? FontStyle.Normal : FontStyle.Bold;
-        gameObjectName = GUILayout.TextField(gameObjectName, gameObjStyle);
-        gameObject = GameObject.Find(gameObjectName);
+        GameOptionsMenu(component);
 
-        GUI.enabled = gameObject != null;
-        if (GUILayout.Button("add"))
-        {
-            component.gameObjects.Add(gameObject);
-            gameObjectName = "";
-        }
-        GUI.enabled = true;
 
-        component.gameObjects.ToList().ForEach(g =>
-        {
-            GUILayout.Label(g.name);
-            var pos = g.transform.position;
-            GUILayout.Label("Position: " + pos.x + " " + pos.y + " " + pos.z);
-            if (GUILayout.Button("doubleThis"))
-            {
-                component.position = () => g.transform.position * 2;
-            }
+//        component.gameObjects.ToList().ForEach(g =>
+//        {
+//            GUILayout.Label(g.name);
+//            var pos = g.transform.position;
+//            GUILayout.Label("Position: " + pos.x + " " + pos.y + " " + pos.z);
+//            if (GUILayout.Button("doubleThis"))
+//            {
+//                component.position = () => g.transform.position * 2;
+//            }
+//
+//            var rot = g.transform.rotation.eulerAngles;
+//            GUILayout.Label("Rotation: " + rot.x + " " + rot.y + " " + rot.z);
+//            if (GUILayout.Button("tripleTHis"))
+//            {
+//                component.rotation = () => Quaternion.Euler(g.transform.rotation.eulerAngles * 3);
+//            }
+//        });
 
-            var rot = g.transform.rotation.eulerAngles;
-            GUILayout.Label("Rotation: " + rot.x + " " + rot.y + " " + rot.z);
-            if (GUILayout.Button("tripleTHis"))
-            {
-                component.rotation = () => Quaternion.Euler(g.transform.rotation.eulerAngles * 3);
-            }
-        });
 
-        component.PropertiesToFunctions.ToList().ForEach(pair =>
+        component.PropsToFunctionTypes.ToList().ForEach(pair =>
         {
             var prop = pair.Key;
             var propType = pair.Value;
             GUILayout.Label(prop.ToUpper() + " " + propType.ToString());
-
+            
             // get the functions that have a return type matching this property's type
-            component.Functions
-                .Where((p) => p.Value.GetType().GetGenericArguments().Last() == propType)
-                .ToList()
-                .ForEach(p =>
+            var fns = component.Functions
+                .Where(p => p.Value.GetType().GetGenericArguments().Last() == propType)
+                .OrderBy(p => p.Key)
+                .Select(p => p.Key);
+
+            DropDown("--Assign-Function--", fns, selectedIndex =>
+            {
+                component.AssignFnToProp(prop, fns.ElementAt(selectedIndex));
+            });
+
+            if (component.PropsToFunctions.ContainsKey(prop))
+            {
+                var assignedFn = component.GetAssignedFn(prop);
+                var fn = component.Functions[assignedFn];
+                GUILayout.Label("fn: " + assignedFn);
+                var genericArgs = fn.GetType().GetGenericArguments();
+                var fnParams = genericArgs.Take(genericArgs.Length - 1); // the last arg is the delegate's return value
+
+                fnParams.ToList().ForEachWithIndex((param, i) =>
                 {
-                    GUILayout.Label("fn: " + p.Key);
-                    var allArgs = p.Value.GetType().GetGenericArguments();
-                    allArgs.Take(allArgs.Length - 1).ToList().ForEachWithIndex((arg, i) =>
+                    GUILayout.Label("--" + param.FullName);
+                    // TODO: this is where you dig through other GameObjects' properties for things that match this param's datatype
+
+                    if (TypesToControls.ContainsKey(param))
                     {
-                        GUILayout.Label("--" + arg.FullName);
-                        // TODO: this is where you dig through other GameObjects' properties for things that match this param's datatype
+                        var args = component.GetArgs(prop);
+                        var nextVal = TypesToControls[param].Invoke(args[i]);
+                        component.SetArg(prop, i, nextVal);
+                    }
+                    else
+                    {
+                        // Debug.Log("Control not found for arg of type " + arg.FullName + " at position: " + i);
+                    }
 
-                        if (Controls.ContainsKey(arg))
-                        {
-                            var currParams = component.GetParams(prop);
-                            var param = p.Key;
-                            var val = currParams.ContainsKey(param) ? (float)currParams[param] : new float(); // TODO: float
-                            var nextVal = Controls[arg].Invoke(val);
-                            component.SetParam(prop, param, nextVal);
-                        }
-                        else
-                        {
-//                            Debug.Log("Control not found for arg of type " + arg.FullName + " at position: " + i);
-                        }
-
-                        // TODO: apply function to anything as adapter. construct chains of relationships node 
-                        // [GameObject Component Param]--[fn]--[fn]--<list fns with matching types>--[ReactiveComponent prop]
-                    });
+                    // TODO: apply function to anything as adapter. construct chains of relationships node 
+                    // [GameObject Component Param]--[fn]--[fn]--<list fns with matching types>--[ReactiveComponent prop]
                 });
+            }
         });
 
+    }
+
+    private GameObject selectedGameObject;
+    private void GameOptionsMenu(ReactiveComponent component)
+    {
+        var gameObjects = FindObjectsOfType<GameObject>()
+            .Where(g => g.activeInHierarchy)
+            .OrderBy(g => g.name);
+
+        DropDown("--Game-Objects--", gameObjects.Select(g => g.name), selectedIndex =>
+        {
+            selectedGameObject = gameObjects.ElementAt(selectedIndex);
+        });
+    }
+
+    private void DropDown(string title, IEnumerable<string> options, Action<int> onSelect)
+    {
+        var allOptions = options.Concat(new[] { title }).ToArray();
+        var selectedIndex = EditorGUILayout.Popup(allOptions.Length - 1, allOptions);
+        if (selectedIndex < allOptions.Length - 1)
+        {
+            onSelect.Invoke(selectedIndex);
+        }
     }
 }
 
