@@ -3,51 +3,51 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
-using Object = System.Object;
 
 [CustomEditor(typeof(ReactiveComponent))]
 public class ReactiveComponentEditor : Editor
 {
-    private bool btn;
-    private string gameObjectName = "";
-    private GameObject gameObject;
-
-    private Dictionary<Type, Func<Ref, Ref>> TypesToControls;
+    private GameObject _selectedGameObject;
+    private readonly Dictionary<Type, Func<Ref, Ref>> _typesToControls;
 
     public ReactiveComponentEditor()
     {
-        TypesToControls = new Dictionary<Type, Func<Ref, Ref>>
+        _typesToControls = new Dictionary<Type, Func<Ref, Ref>>
         {
             {
                 typeof (float), (val) =>
                 {
                     var nextVal = EditorGUILayout.FloatField(null == val ? new float() : (float) val.Get());
-                    return new Ref(() => nextVal);
+                    return new Ref(() => nextVal); // TODO: OR dig through other GameObjects/components
                 }
-                // TODO: OR dig through other GameObjects/components
-            }
+            },
+            {typeof (Vector3), Vector3Control},
+            {typeof (Quaternion), QuaternionControl}
         };
-
-        TypesToControls.Add(typeof (Vector3), Vector3Control);
     }
 
     private Ref Vector3Control(Ref val)
     {
-        var go = EditorGUILayout.ObjectField(
-            selectedGameObject ?? new UnityEngine.Object(),
-            typeof (GameObject),
-            true);
+        GameObjectSelector(); // assigns _selectedGameObject
 
-        if (go.GetType() == typeof (GameObject))
+        var options = new Dictionary<string, Ref>
         {
-            selectedGameObject = (GameObject) go;
-        }
+            {"zero", new Ref(() => Vector3.zero)},
+            {"one", new Ref(() => Vector3.one)},
+            {"left", new Ref(() => Vector3.left)},
+            {"right", new Ref(() => Vector3.right)},
+            {"up", new Ref(() => Vector3.up)},
+            {"down", new Ref(() => Vector3.down)},
+            {"forward", new Ref(() => Vector3.forward)},
+            {"back", new Ref(() => Vector3.back)},
 
-        if (null != selectedGameObject)
+        }.ToList();
+
+        if (null != _selectedGameObject)
         {
-            var t = selectedGameObject.transform;
+            var t = _selectedGameObject.transform;
 
-            var options = new Dictionary<string, Ref>
+            var goOptions = new Dictionary<string, Ref>
             {
                 {"position", new Ref(() => t.position)},
                 {"localPosition", new Ref(() => t.localPosition)},
@@ -57,52 +57,66 @@ public class ReactiveComponentEditor : Editor
                 {"lossyScale", new Ref(() => t.lossyScale)},
             }.ToList();
 
-            var selectedIndex = DropDown("--Select-Field--", options.Select(pair => pair.Key));
-            if (selectedIndex < options.Count)
-            {
-                return options.ElementAt(selectedIndex).Value; // TODO: might need to be a fn to get current value
-            }
+            options = options.Concat(goOptions).ToList();
         }
 
-        return val;
+        var selectedIndex = DropDown("--Select-Field--", options.Select(pair => pair.Key));
+        return selectedIndex < options.Count ? options.ElementAt(selectedIndex).Value : val;
     }
 
+    private Ref QuaternionControl(Ref val)
+    {
+        GameObjectSelector(); // assigns _selectedGameObject
 
+        var options = new Dictionary<string, Ref>
+        {
+            {"identity", new Ref(() => Quaternion.identity)},
+        }.ToList();
+
+        if (null != _selectedGameObject)
+        {
+            var t = _selectedGameObject.transform;
+
+            var goOptions = new Dictionary<string, Ref>
+            {
+                {"identity", new Ref(() => Quaternion.identity)},
+                {"rotation", new Ref(() => t.rotation)},
+                {"localRotation", new Ref(() => t.localRotation)},
+                // TODO: other functions ex: Vector3 -> Quaternion
+            }.ToList();
+
+            options = options.Concat(goOptions).ToList();
+        }
+
+        var selectedIndex = DropDown("--Select-Field--", options.Select(pair => pair.Key));
+        return selectedIndex < options.Count ? options.ElementAt(selectedIndex).Value : val;
+    }
+
+    private void GameObjectSelector()
+    {
+        var go = EditorGUILayout.ObjectField(
+            _selectedGameObject ?? new UnityEngine.Object(),
+            typeof(GameObject),
+            true);
+
+        if (go is GameObject)
+        {
+            _selectedGameObject = (GameObject)go;
+        }
+    }
 
     public override void OnInspectorGUI()
     {
         var component = target as ReactiveComponent;
 
-        GameOptionsMenu(component);
-
-
-//        component.gameObjects.ToList().ForEach(g =>
-//        {
-//            GUILayout.Label(g.name);
-//            var pos = g.transform.position;
-//            GUILayout.Label("Position: " + pos.x + " " + pos.y + " " + pos.z);
-//            if (GUILayout.Button("doubleThis"))
-//            {
-//                component.position = () => g.transform.position * 2;
-//            }
-//
-//            var rot = g.transform.rotation.eulerAngles;
-//            GUILayout.Label("Rotation: " + rot.x + " " + rot.y + " " + rot.z);
-//            if (GUILayout.Button("tripleTHis"))
-//            {
-//                component.rotation = () => Quaternion.Euler(g.transform.rotation.eulerAngles * 3);
-//            }
-//        });
-
-
-        component.PropsToFunctionTypes.ToList().ForEach(pair =>
+        component.PropsToTypes.ToList().ForEach(pair =>
         {
             var prop = pair.Key;
             var propType = pair.Value;
             GUILayout.Label(prop.ToUpper() + " " + propType.ToString());
             
             // get the functions that have a return type matching this property's type
-            var fns = component.Functions
+            var fns = component.NamesToFunctions
                 .Where(p => p.Value.GetType().GetGenericArguments().Last() == propType)
                 .OrderBy(p => p.Key)
                 .Select(p => p.Key);
@@ -115,7 +129,7 @@ public class ReactiveComponentEditor : Editor
             if (component.PropsToFunctions.ContainsKey(prop))
             {
                 var assignedFn = component.GetAssignedFn(prop);
-                var fn = component.Functions[assignedFn];
+                var fn = component.NamesToFunctions[assignedFn];
                 GUILayout.Label("fn: " + assignedFn);
                 var genericArgs = fn.GetType().GetGenericArguments();
                 var fnParamTypes = genericArgs.Take(genericArgs.Length - 1); // the last arg is the delegate's return value
@@ -126,15 +140,15 @@ public class ReactiveComponentEditor : Editor
                     GUILayout.Label("arg: " + component.GetArgs(prop)[i]);
                     // TODO: this is where you dig through other GameObjects' properties for things that match this param's datatype
 
-                    if (TypesToControls.ContainsKey(paramType))
+                    if (_typesToControls.ContainsKey(paramType))
                     {
                         var args = component.GetArgs(prop);
-                        var nextVal = TypesToControls[paramType].Invoke(args[i]);
+                        var nextVal = _typesToControls[paramType].Invoke(args[i]);
                         component.SetArg(prop, i, nextVal);
                     }
                     else
                     {
-                        // Debug.Log("Control not found for arg of type " + arg.FullName + " at position: " + i);
+                        GUILayout.Label("Control not found for arg of type " + paramType.FullName);
                     }
 
                     // TODO: apply function to anything as adapter. construct chains of relationships node 
@@ -143,19 +157,6 @@ public class ReactiveComponentEditor : Editor
             }
         });
 
-    }
-
-    private GameObject selectedGameObject;
-    private void GameOptionsMenu(ReactiveComponent component)
-    {
-        var gameObjects = FindObjectsOfType<GameObject>()
-            .Where(g => g.activeInHierarchy)
-            .OrderBy(g => g.name);
-
-        DropDown("--Game-Objects--", gameObjects.Select(g => g.name), selectedIndex =>
-        {
-            selectedGameObject = gameObjects.ElementAt(selectedIndex);
-        });
     }
 
     private int DropDown(string title, IEnumerable<string> options)
