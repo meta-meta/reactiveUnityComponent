@@ -1,0 +1,20 @@
+<!DOCTYPE patchbay>
+<patchbay version="0.3.8.7" name="max-unity">
+ <output-sockets>
+  <socket exclusive="off" client="Max" type="jack-audio" name="Max">
+   <plug>out1</plug>
+   <plug>out2</plug>
+  </socket>
+ </output-sockets>
+ <input-sockets>
+  <socket exclusive="off" client="Unity" type="jack-audio" name="Unity">
+   <plug>in1</plug>
+   <plug>in2</plug>
+  </socket>
+ </input-sockets>
+ <slots/>
+ <cables>
+  <cable output="Max" input="Unity" type="jack-audio"/>
+ </cables>
+</patchbay>
+
